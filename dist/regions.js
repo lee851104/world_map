@@ -4,7 +4,7 @@ const aliases={'Taiwan':'TW','France':'FR','Norway':'NO','Somaliland':'X-SOMALIL
 export function normalizeRegions(collection,scope){
  return collection.features.map(feature=>{
  const p=feature.properties;
-  if(scope.startsWith('adm1:'))return {id:`adm1:${scope.slice(5)}-${p.id}`,name:scope==='adm1:JPN'?(japanNames[Number(p.iso?.slice(3))-1]||p.name):p.name,englishName:p.name,scope,feature};
+  if(scope.startsWith('adm1:'))return {id:`adm1:${scope.slice(5)}-${p.id}`,name:p.nameZh||(scope==='adm1:JPN'?(japanNames[Number(p.iso?.slice(3))-1]||p.name):p.name),englishName:p.name,scope,feature};
   if(scope==='taiwan')return {id:`taiwan:${p.COUNTYCODE}`,name:p.COUNTYNAME.replaceAll('台','臺'),englishName:p.COUNTYENG,scope,feature};
   const englishName=p.name||p.ADMIN;
   const code=aliases[englishName]||p['ISO3166-1-Alpha-2']||p.ISO_A2;
