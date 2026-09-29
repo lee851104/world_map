@@ -3,11 +3,15 @@ import {emptyState,loadState,persistState,validateState,setRegionColor,upsertEve
 import {createMap} from './map.js';
 import {MapDocuments,api,DOCUMENTS_KEY} from './documents.js';
 import {exportKml} from './kml.js';
+import {subdivisionScopes,coloredSubdivisions} from './map-view.js';
+import {mapPng} from './image-export.js';
 const $=id=>document.getElementById(id);
 const palette=['#84b8a4','#83afcb','#ab9aca','#e5b976','#d98c88','#739eaa'];
 let all={},scope='world',selected=null,state=emptyState(),validIds=new Set(),editing=null,storageBlocked=false,storageRaw=null,toastTimer;
 let editingPerson=null;
 let documents,adminIndex={countries:{}},scopeRequest=0;
+let worldMode='countries',overlayRequest=0,imageUrl=null,imageFile=null,imageRequest=0;
+const pendingScopes=new Map();
 const map=createMap($('map'),{onSelect:selectRegion});
 function notify(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,3500)}
 function setTools(open){
@@ -47,15 +51,44 @@ async function switchScope(next){
 }
 function scopeCountryName(value){return all.world?.find(r=>r.iso3===value.slice(5))?.name||value.slice(5)}
 function subdivisionScope(r){return r?.id==='world:TW'?'taiwan':r?.scope==='world'&&adminIndex.countries[r.iso3]?`adm1:${r.iso3}`:null}
+async function cachedScope(value){
+ if(all[value])return all[value];
+ if(!pendingScopes.has(value))pendingScopes.set(value,loadRegions(value).then(regions=>all[value]=regions).finally(()=>pendingScopes.delete(value)));
+ return pendingScopes.get(value);
+}
+async function updateOverlays(){
+ const request=++overlayRequest,active=scope==='world'&&worldMode==='subdivisions';
+ $('world-mode').hidden=scope!=='world';
+ $('country-colors').setAttribute('aria-pressed',String(worldMode==='countries'));
+ $('subdivision-colors').setAttribute('aria-pressed',String(worldMode==='subdivisions'));
+ $('overlay-status').textContent='';
+ map.setOverlays(active?coloredSubdivisions(all,state):[]);
+ if(!active)return true;
+ const missing=subdivisionScopes(state).filter(value=>!all[value]);
+ if(!missing.length)return true;
+ $('overlay-status').textContent='載入中…';
+ try{
+  // Bound concurrent downloads on mobile; only painted countries need geometry.
+  let cursor=0;
+  await Promise.all(Array.from({length:Math.min(3,missing.length)},async()=>{while(cursor<missing.length&&request===overlayRequest)await cachedScope(missing[cursor++])}));
+  if(request!==overlayRequest)return false;
+  map.setOverlays(coloredSubdivisions(all,state));$('overlay-status').textContent='';return true;
+ }catch(error){if(request===overlayRequest){$('overlay-status').textContent='載入失敗，點行政區重試';notify(error.message)}return false}
+}
+function setWorldMode(value){worldMode=value;if(value==='countries'&&current()?.scope!=='world'){selected=null;map.select(null)}refresh()}
+$('country-colors').onclick=()=>setWorldMode('countries');
+$('subdivision-colors').onclick=()=>setWorldMode('subdivisions');
 async function selectRegion(id,focus=false){
  const found=Object.values(all).flat().find(r=>r.id===id);if(!found)return;
  const nextScope=found.scope;
- if(nextScope!==scope&&!await switchScope(nextScope))return;
+ const onWorldOverlay=scope==='world'&&worldMode==='subdivisions'&&found.scope!=='world';
+ if(!onWorldOverlay&&nextScope!==scope&&!await switchScope(nextScope))return;
  selected=id;map.select(id);
  if(focus)map.focus(id);
  setSearch(false);refresh();
 }
 function refresh(){
+ updateOverlays();
  map.setColors(Object.fromEntries(Object.keys(state.regions).map(id=>[id,{colors:regionColors(state,id)}])));listRegions();
  const r=current();$('empty-panel').hidden=!!r;$('region-panel').hidden=!r;
  const names=(state.regions[selected]?.assignees||[]).map(id=>state.salespeople.find(p=>p.id===id)?.name).filter(Boolean);
@@ -119,7 +152,8 @@ function renderPeople(){
 function openPeople(){$('more-menu').open=false;renderPeople();resetPerson();$('people-dialog').showModal()}
 $('manage-people').onclick=openPeople;$('people-button').onclick=openPeople;$('person-cancel').onclick=resetPerson;
 $('person-form').onsubmit=e=>{e.preventDefault();const name=$('person-name').value.trim();if(!name){$('people-error').textContent='請填寫姓名。';return}try{if(save(upsertSalesperson(state,{id:editingPerson||crypto.randomUUID(),name,color:$('person-color').value}))){renderPeople();resetPerson()}}catch{$('people-error').textContent='請檢查姓名與顏色。'}};
-$('backup-button').onclick=()=>{$('more-menu').open=false;$('backup-error').textContent='';$('backup-dialog').showModal()};
+$('backup-button').onclick=()=>{$('more-menu').open=false;$('backup-error').textContent='';$('kml-downloads').replaceChildren();$('backup-dialog').showModal()};
+$('backup-dialog').addEventListener('close',()=>{imageRequest++;if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=null;imageFile=null;$('image-result').hidden=true;$('image-preview').removeAttribute('src');$('image-download').removeAttribute('href')});
 function downloadFile(name,content,type='application/json'){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name.replace(/[\\/:*?"<>|]/g,'-');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 $('export-data').onclick=()=>{try{const raw=storageBlocked?(localStorage.getItem(DOCUMENTS_KEY)||localStorage.getItem('world-notes:v1')):JSON.stringify({format:'atlas-map',name:documents.active.name,state},null,2);downloadFile(`${documents?.active.name||'atlas'}-backup.json`,raw||'');notify('備份已下載')}catch{$('backup-error').textContent='無法匯出備份。'}};
 $('import-data').onclick=()=>$('import-file').click();
@@ -173,6 +207,20 @@ $('copy-local').onclick=async()=>{if(!await confirmAction('將此裝置地圖複
 $('retry-sync').onclick=async()=>{try{await documents.retry()}catch(e){notify(e.message)}};
 $('reload-cloud').onclick=async()=>{if(!await confirmAction('載入雲端版本？','目前尚未同步的修改將被取代，請先下載備份。'))return;try{await documents.reloadCloud();activateDocument()}catch(e){notify(e.message)}};
 $('download-unsaved').onclick=()=>$('export-data').click();
+$('export-image').onclick=async()=>{
+ const control=$('export-image'),request=++imageRequest,documentName=documents.active.name,scopeName=scope==='world'?'世界':scope==='taiwan'?'台灣':scopeCountryName(scope);control.disabled=true;$('backup-error').textContent='';
+ try{
+  if(!await updateOverlays())throw Error('請等行政區載入完成後再匯出。');
+  if(request!==imageRequest)return;
+  const blob=await mapPng($('map'));if(request!==imageRequest)return;if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=URL.createObjectURL(blob);
+  const name=`${documentName.replace(/[\\/:*?"<>|]/g,'-')}-${scopeName}.png`;
+  imageFile=new File([blob],name,{type:'image/png'});
+  $('image-preview').src=imageUrl;$('image-download').href=imageUrl;$('image-download').download=name;
+  $('image-share').hidden=!navigator.canShare?.({files:[imageFile]});$('image-result').hidden=false;
+  $('image-download').focus();notify('圖片已產生，請下載或儲存圖片。');
+ }catch(error){if(request===imageRequest)$('backup-error').textContent=error.message}finally{control.disabled=false}
+};
+$('image-share').onclick=async()=>{if(!imageFile)return;try{await navigator.share({files:[imageFile],title:documents.active.name})}catch(error){if(error.name!=='AbortError')$('backup-error').textContent='無法開啟分享選單，請使用下載 PNG。'}};
 $('export-kml').onclick=async()=>{
  const control=$('export-kml');control.disabled=true;$('backup-error').textContent='';$('kml-downloads').replaceChildren();
  try{const scopes=[...new Set(Object.keys(state.regions).filter(id=>id.startsWith('adm1:')).map(id=>`adm1:${id.slice(5,8)}`))];for(const value of scopes)if(!all[value])all[value]=await loadRegions(value);
