@@ -1,0 +1,7 @@
+{
+  "retrieved": "2026-09-29T12:32:48.517Z",
+  "sources": {
+    "world": "https://raw.githubusercontent.com/datasets/geo-countries/main/data/countries.geojson",
+    "taiwan": "https://cdn.jsdelivr.net/npm/taiwan-atlas@2021.9.20/counties-10t.json"
+  }
+}
