@@ -7,5 +7,5 @@ for(const name of ['index.html','credits.html']){
  const content=await readFile(path.join(root,name),'utf8');
  for(const [,ref] of content.matchAll(/(?:src|href)="(\.\/[^"#]+)"/g))await access(path.join(root,ref));
 }
-for(const name of ['app.js','map.js','regions.js','store.js']){const result=spawnSync(process.execPath,['--check',path.join(root,name)],{encoding:'utf8'});if(result.status!==0)throw Error(result.stderr)}
+for(const name of ['app.js','map.js','regions.js','store.js','documents.js','kml.js']){const result=spawnSync(process.execPath,['--check',path.join(root,name)],{encoding:'utf8'});if(result.status!==0)throw Error(result.stderr)}
 console.log('Static assets and JavaScript syntax: PASS');

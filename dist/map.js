@@ -46,8 +46,8 @@ export function createMap(container,{onSelect}){
   width=container.clientWidth||1000;height=container.clientHeight||700;svg.attr('viewBox',`0 0 ${width} ${height}`);
   const scope=regions[0].scope,collection={type:'FeatureCollection',features:regions.filter(r=>!offshore.has(r.id)).map(r=>r.feature)};
   svg.attr('data-scope',scope);
-  projection=scope==='world'?d3.geoEqualEarth():d3.geoMercator();
-  projection.fitExtent(scope==='world'?[[32,45],[width-32,height-65]]:[[width<550?125:190,30],[width-25,height-75]],scope==='world'?{type:'Sphere'}:collection);
+  projection=scope==='world'?d3.geoEqualEarth():scope==='adm1:USA'?d3.geoAlbersUsa():d3.geoMercator().rotate(scope.startsWith('adm1:')?[-d3.geoCentroid(collection)[0],0]:[0,0]);
+  projection.fitExtent(scope==='world'?[[32,45],[width-32,height-65]]:scope==='taiwan'?[[width<550?125:190,30],[width-25,height-75]]:[[24,30],[width-24,height-75]],scope==='world'?{type:'Sphere'}:collection);
   path=d3.geoPath(projection);
   backdrop.selectAll('*').remove();
   if(scope==='world'){

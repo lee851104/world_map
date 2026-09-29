@@ -41,7 +41,7 @@ export function persistState(storage,state,expectedRaw){
  if(expectedRaw!==undefined&&storage.getItem(STORAGE_KEY)!==expectedRaw)throw Error('另一個分頁已修改紀錄，請重新整理後再操作。');
  storage.setItem(STORAGE_KEY,JSON.stringify(state));
 }
-function update(state,id,fn){if(!/^(world|taiwan):[A-Za-z0-9-]+$/.test(id))fail();return {...state,regions:{...state.regions,[id]:fn(state.regions[id]||record())}};}
+function update(state,id,fn){if(!/^(world|taiwan|adm1):[A-Za-z0-9-]+$/.test(id))fail();return {...state,regions:{...state.regions,[id]:fn(state.regions[id]||record())}};}
 export function setRegionColor(state,id,color){if(color!==null&&!validColor(color))fail();return update(state,id,r=>({...r,color,assignees:[]}));}
 export function upsertSalesperson(state,person){const checked=checkPerson(person);const people=state.salespeople||[];return {...state,salespeople:people.some(p=>p.id===checked.id)?people.map(p=>p.id===checked.id?checked:p):[...people,checked]};}
 export function deleteSalesperson(state,id){return {...state,salespeople:(state.salespeople||[]).filter(p=>p.id!==id),regions:Object.fromEntries(Object.entries(state.regions).map(([key,r])=>[key,{...r,assignees:(r.assignees||[]).filter(value=>value!==id)}]))};}
