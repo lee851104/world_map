@@ -1,0 +1,16 @@
+import fs from 'node:fs/promises';
+import pc from 'polygon-clipping';
+import {geoArea} from 'd3';
+const root=new URL('../',import.meta.url);
+const read=async path=>JSON.parse(await fs.readFile(new URL(path,root)));
+const original=await read('scripts/sources/KAZ-world-base.json');
+const world=await read('dist/data/world.json');
+const coordinates=pc.union(...original.features.map(f=>f.geometry.coordinates));
+for(const polygon of coordinates)if(geoArea({type:'Polygon',coordinates:polygon})>Math.PI*2)polygon.forEach(r=>r.reverse());
+world.features.find(f=>f.properties.name==='Kazakhstan').geometry={type:'MultiPolygon',coordinates};
+world.features=world.features.filter(f=>f.properties.name!=='Baykonur Cosmodrome');
+await fs.writeFile(new URL('dist/data/world.json',root),JSON.stringify(world));
+const catalog=await read('dist/data/adm1-index.json');
+catalog.legacyWorldIds=[...new Set([...(catalog.legacyWorldIds||[]),'world:X-BAYKONUR-COSMODROME'])];
+await fs.writeFile(new URL('dist/data/adm1-index.json',root),JSON.stringify(catalog));
+console.log('Kazakhstan national footprint includes leased Baikonur; legacy records remain valid.');

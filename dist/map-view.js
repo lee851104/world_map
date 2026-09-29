@@ -1,5 +1,12 @@
 import {regionColors} from './store.js';
 
+export function drilldownScope(region,visibleScope,catalog){
+ if(!region||visibleScope!=='world')return null;
+ if(region.id==='world:TW'||region.scope==='taiwan')return 'taiwan';
+ const iso=region.scope.startsWith('adm1:')?region.scope.slice(5):region.iso3;
+ return catalog.countries[iso]?`adm1:${iso}`:null;
+}
+
 export function createProjection(d3,scope,collection,extent){
  const projection=d3.geoMercator();
  if(scope==='world'){

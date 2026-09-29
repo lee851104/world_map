@@ -5,6 +5,7 @@ import {normalizeRegions} from '../dist/regions.js';
 const root=new URL('../',import.meta.url);
 const catalog=JSON.parse(await readFile(new URL('dist/data/adm1-index.json',root),'utf8'));
 const ids=[];for(const scope of ['world','taiwan'])ids.push(...normalizeRegions(JSON.parse(await readFile(new URL(`dist/data/${scope}.json`,root),'utf8')),scope).map(r=>r.id));
+ids.push(...catalog.legacyWorldIds||[]);
 for(const [iso,entry]of Object.entries(catalog.countries))ids.push(...entry.ids.map(id=>`adm1:${iso}-${id}`));
 await mkdir(new URL('worker/',root),{recursive:true});await writeFile(new URL('worker/valid-region-ids.json',root),JSON.stringify(ids));
 await mkdir(new URL('dist/server/',root),{recursive:true});await mkdir(new URL('dist/client/',root),{recursive:true});await mkdir(new URL('dist/.openai/',root),{recursive:true});

@@ -3,7 +3,7 @@ import {emptyState,loadState,persistState,validateState,setRegionColor,upsertEve
 import {createMap} from './map.js';
 import {MapDocuments,api,DOCUMENTS_KEY} from './documents.js';
 import {exportKml} from './kml.js';
-import {subdivisionScopes,coloredSubdivisions} from './map-view.js';
+import {subdivisionScopes,coloredSubdivisions,drilldownScope} from './map-view.js';
 import {mapPng} from './image-export.js';
 const $=id=>document.getElementById(id);
 const palette=['#84b8a4','#83afcb','#ab9aca','#e5b976','#d98c88','#739eaa'];
@@ -50,7 +50,7 @@ async function switchScope(next){
  return true;
 }
 function scopeCountryName(value){return all.world?.find(r=>r.iso3===value.slice(5))?.name||value.slice(5)}
-function subdivisionScope(r){return r?.id==='world:TW'?'taiwan':r?.scope==='world'&&adminIndex.countries[r.iso3]?`adm1:${r.iso3}`:null}
+function subdivisionScope(r){return drilldownScope(r,scope,adminIndex)}
 async function cachedScope(value){
  if(all[value])return all[value];
  if(!pendingScopes.has(value))pendingScopes.set(value,loadRegions(value).then(regions=>all[value]=regions).finally(()=>pendingScopes.delete(value)));
@@ -93,11 +93,11 @@ function refresh(){
  const r=current();$('empty-panel').hidden=!!r;$('region-panel').hidden=!r;
  const names=(state.regions[selected]?.assignees||[]).map(id=>state.salespeople.find(p=>p.id===id)?.name).filter(Boolean);
  $('selection-label').textContent=r?[r.name,...names].join(' · '):'';$('selection-label').hidden=!r;
- const childScope=subdivisionScope(r);$('enter-taiwan').hidden=!childScope;$('enter-taiwan').textContent=childScope==='taiwan'?'查看 22 縣市':'查看行政區';
+ const childScope=subdivisionScope(r);$('enter-taiwan').hidden=!childScope;$('enter-taiwan').textContent=childScope==='taiwan'?'查看台灣 22 縣市':childScope?`查看${scopeCountryName(childScope)}行政區`:'查看行政區';
  if(!r)return;
  const record=state.regions[r.id]||{color:null,events:[]};
  $('region-name').textContent=r.name;$('region-english').textContent=r.englishName;$('region-scope').textContent=r.scope==='world'?'世界地圖 / 國家與地區':r.scope==='taiwan'?'台灣 / 縣市':`${scopeCountryName(r.scope)} / 一級行政區`;
- $('explore-taiwan').hidden=r.scope!=='world';$('explore-taiwan').disabled=!childScope;$('explore-taiwan').textContent=childScope==='taiwan'?'查看 22 縣市':childScope?'查看一級行政區':'暫無可用行政區圖資';
+ $('explore-taiwan').hidden=scope!=='world';$('explore-taiwan').disabled=!childScope;$('explore-taiwan').textContent=childScope==='taiwan'?'查看 22 縣市':childScope?'查看一級行政區':'暫無可用行政區圖資';
  document.querySelector('.color-section h3').textContent=r.id==='world:TW'?'世界地圖顏色':'地圖顏色';
  $('color-value').textContent=record.assignees?.length?'業務配色':record.color?.toUpperCase()||'尚未上色';$('custom-color').value=record.color||'#176370';
  for(const b of $('swatches').children){const active=!record.assignees?.length&&b.dataset.color===record.color;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))}
@@ -176,7 +176,7 @@ $('share-button').onclick=async()=>{
 async function start(){
  for(const id of ['world-tab','taiwan-tab','backup-button','share-button','tools-toggle','search-toggle'])$(id).disabled=true;
  try{
-  const [world,taiwan,catalog]=await Promise.all([loadRegions('world'),loadRegions('taiwan'),fetch('./data/adm1-index.json').then(r=>{if(!r.ok)throw Error('行政區目錄載入失敗。');return r.json()})]);all={world,taiwan};adminIndex=catalog;validIds=new Set([...world,...taiwan].map(r=>r.id));for(const [iso,entry]of Object.entries(catalog.countries))for(const id of entry.ids)validIds.add(`adm1:${iso}-${id}`);
+  const [world,taiwan,catalog]=await Promise.all([loadRegions('world'),loadRegions('taiwan'),fetch('./data/adm1-index.json').then(r=>{if(!r.ok)throw Error('行政區目錄載入失敗。');return r.json()})]);all={world,taiwan};adminIndex=catalog;validIds=new Set([...world,...taiwan].map(r=>r.id).concat(catalog.legacyWorldIds||[]));for(const [iso,entry]of Object.entries(catalog.countries))for(const id of entry.ids)validIds.add(`adm1:${iso}-${id}`);
   try{documents=new MapDocuments(validIds,syncStatus);state=documents.active.state;await documents.connect();state=documents.active.state;activateDocument()}catch(error){storageBlocked=true;$('storage-warning').textContent=error.message;$('storage-warning').hidden=false}
   if(storageBlocked){$('storage-warning').textContent+=' 已暫停修改；可先匯出備份，再重新整理重試。';$('storage-warning').hidden=false}
   switchScope('world');$('loading').hidden=true;
