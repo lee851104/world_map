@@ -12,6 +12,7 @@ export function createMap(container,{onSelect}){
   if(!regions.length)return;
   width=container.clientWidth||1000;height=container.clientHeight||700;svg.attr('viewBox',`0 0 ${width} ${height}`);
   const scope=regions[0].scope,collection={type:'FeatureCollection',features:regions.map(r=>r.feature)};
+  svg.attr('data-scope',scope);
   projection=scope==='world'?d3.geoEqualEarth():d3.geoMercator();
   projection.fitExtent([[32,45],[width-32,height-65]],scope==='world'?{type:'Sphere'}:collection);
   path=d3.geoPath(projection);

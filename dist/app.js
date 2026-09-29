@@ -7,7 +7,7 @@ let all={},scope='world',selected=null,state=emptyState(),validIds=new Set(),edi
 const map=createMap($('map'),{onSelect:selectRegion});
 function notify(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,3500)}
 function showPanel(){ $('panel').classList.add('open'); }
-function current(){return all[scope]?.find(r=>r.id===selected)}
+function current(){return Object.values(all).flat().find(r=>r.id===selected)}
 function save(next){
  if(storageBlocked){notify('目前資料讀取異常，請先用備份還原，以免覆蓋原紀錄。');return false}
  try{validateState(next,validIds);persistState(localStorage,next,storageRaw);storageRaw=JSON.stringify(next);state=next;refresh();return true}
@@ -33,7 +33,14 @@ function switchScope(next){
 }
 function selectRegion(id,focus=false){
  const found=Object.values(all).flat().find(r=>r.id===id);if(!found)return;
- if(found.scope!==scope)switchScope(found.scope);selected=id;map.select(id);if(focus)map.focus(id);$('search-results').hidden=true;refresh();showPanel();
+ const showCounties=id==='world:TW';
+ const nextScope=showCounties?'taiwan':found.scope;
+ if(nextScope!==scope)switchScope(nextScope);
+ selected=id;map.select(showCounties?null:id);
+ if(showCounties)map.reset();else if(focus)map.focus(id);
+ $('search-results').hidden=true;refresh();
+ // Leave the county map visible on phones; Taiwan-wide notes remain in the panel.
+ if(showCounties)$('panel').classList.remove('open');else showPanel();
 }
 function refresh(){
  map.setColors(state.regions);listRegions();
@@ -41,8 +48,9 @@ function refresh(){
  $('mobile-panel').firstChild.textContent=r?`${r.name} · 地方記事 `:'地區與記事 ';
  if(!r)return;
  const record=state.regions[r.id]||{color:null,events:[]};
- $('region-name').textContent=r.name;$('region-english').textContent=r.englishName;$('region-scope').textContent=scope==='world'?'世界地圖 / 國家與地區':'台灣地圖 / 縣市';
+ $('region-name').textContent=r.name;$('region-english').textContent=r.englishName;$('region-scope').textContent=r.id==='world:TW'?'台灣 / 整體記事':r.scope==='world'?'世界地圖 / 國家與地區':'台灣地圖 / 縣市';
  $('explore-taiwan').hidden=r.id!=='world:TW';
+ document.querySelector('.color-section h3').textContent=r.id==='world:TW'?'世界地圖顏色':'地圖顏色';
  $('color-value').textContent=record.color?.toUpperCase()||'尚未上色';$('custom-color').value=record.color||'#176370';
  for(const b of $('swatches').children){const active=b.dataset.color===record.color;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))}
  $('event-count').textContent=record.events.length;$('events').replaceChildren();
