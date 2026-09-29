@@ -1,9 +1,10 @@
 import {loadRegions,searchRegions} from './regions.js';
-import {emptyState,loadState,persistState,validateState,setRegionColor,upsertEvent,deleteEvent,MAX_BACKUP_BYTES} from './store.js';
+import {emptyState,loadState,persistState,validateState,setRegionColor,upsertEvent,deleteEvent,MAX_BACKUP_BYTES,upsertSalesperson,deleteSalesperson,setRegionAssignees,regionColors,MAX_ASSIGNEES} from './store.js';
 import {createMap} from './map.js';
 const $=id=>document.getElementById(id);
 const palette=['#84b8a4','#83afcb','#ab9aca','#e5b976','#d98c88','#739eaa'];
 let all={},scope='world',selected=null,state=emptyState(),validIds=new Set(),editing=null,storageBlocked=false,storageRaw=null,toastTimer;
+let editingPerson=null;
 const map=createMap($('map'),{onSelect:selectRegion});
 function notify(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,3500)}
 function setTools(open){
@@ -26,7 +27,7 @@ function text(tag,content,className){const el=document.createElement(tag);el.tex
 function button(label,action,className){const el=text('button',label,className);el.type='button';el.addEventListener('click',action);return el}
 function listRegions(){
  $('region-list').replaceChildren();
- for(const r of all[scope]||[]){const b=button(r.name,()=>selectRegion(r.id,true));const dot=text('span','','region-dot');dot.style.background=state.regions[r.id]?.color||'';b.prepend(dot);$('region-list').append(b)}
+ for(const r of all[scope]||[]){const b=button(r.name,()=>selectRegion(r.id,true));const dot=text('span','','region-dot');dot.style.background=colorBackground(regionColors(state,r.id));b.prepend(dot);$('region-list').append(b)}
  $('region-total').textContent=all[scope]?.length||0;
 }
 function switchScope(next){
@@ -39,24 +40,36 @@ function switchScope(next){
 }
 function selectRegion(id,focus=false){
  const found=Object.values(all).flat().find(r=>r.id===id);if(!found)return;
- const showCounties=id==='world:TW';
- const nextScope=showCounties?'taiwan':found.scope;
+ const nextScope=found.scope;
  if(nextScope!==scope)switchScope(nextScope);
- selected=id;map.select(showCounties?null:id);
- if(showCounties)map.reset();else if(focus)map.focus(id);
+ selected=id;map.select(id);
+ if(focus)map.focus(id);
  setSearch(false);refresh();
 }
 function refresh(){
- map.setColors(state.regions);listRegions();
+ map.setColors(Object.fromEntries(Object.keys(state.regions).map(id=>[id,{colors:regionColors(state,id)}])));listRegions();
  const r=current();$('empty-panel').hidden=!!r;$('region-panel').hidden=!r;
- $('selection-label').textContent=r?.name||'';$('selection-label').hidden=!r;
+ const names=(state.regions[selected]?.assignees||[]).map(id=>state.salespeople.find(p=>p.id===id)?.name).filter(Boolean);
+ $('selection-label').textContent=r?[r.name,...names].join(' · '):'';$('selection-label').hidden=!r;
+ $('enter-taiwan').hidden=r?.id!=='world:TW';
  if(!r)return;
  const record=state.regions[r.id]||{color:null,events:[]};
  $('region-name').textContent=r.name;$('region-english').textContent=r.englishName;$('region-scope').textContent=r.id==='world:TW'?'台灣 / 整體記事':r.scope==='world'?'世界地圖 / 國家與地區':'台灣地圖 / 縣市';
  $('explore-taiwan').hidden=r.id!=='world:TW';
  document.querySelector('.color-section h3').textContent=r.id==='world:TW'?'世界地圖顏色':'地圖顏色';
- $('color-value').textContent=record.color?.toUpperCase()||'尚未上色';$('custom-color').value=record.color||'#176370';
- for(const b of $('swatches').children){const active=b.dataset.color===record.color;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))}
+ $('color-value').textContent=record.assignees?.length?'業務配色':record.color?.toUpperCase()||'尚未上色';$('custom-color').value=record.color||'#176370';
+ for(const b of $('swatches').children){const active=!record.assignees?.length&&b.dataset.color===record.color;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))}
+ const focusedPerson=$('assignees').contains(document.activeElement)?document.activeElement.dataset.person:null;
+ $('assignees').replaceChildren();
+ const assigned=record.assignees||[];
+ $('assignee-count').textContent=`${assigned.length} / ${MAX_ASSIGNEES}`;
+ for(const person of state.salespeople){
+  const label=text('label','','assignee-option');const input=document.createElement('input');input.type='checkbox';input.dataset.person=person.id;input.checked=assigned.includes(person.id);input.disabled=!input.checked&&assigned.length>=MAX_ASSIGNEES;
+  input.onchange=()=>{const next=input.checked?[...assigned,person.id]:assigned.filter(id=>id!==person.id);try{if(!save(setRegionAssignees(state,r.id,next)))refresh()}catch(error){notify(error.message);refresh()}};
+  const swatch=text('span','','person-swatch');swatch.style.background=person.color;label.append(input,swatch,text('span',person.name));$('assignees').append(label);
+ }
+ if(!state.salespeople.length)$('assignees').append(text('p','先新增業務，再勾選負責人。','events-empty'));
+ if(focusedPerson){const restored=[...$('assignees').querySelectorAll('input')].find(input=>input.dataset.person===focusedPerson);restored?.focus()}
  $('event-count').textContent=record.events.length;$('events').replaceChildren();
  if(!record.events.length)$('events').append(text('p','尚無記事','events-empty'));
  for(const event of record.events){const card=text('article','','event-card');card.append(text('time',event.date.replaceAll('-',' / '),'event-date'),text('h4',event.title));if(event.content)card.append(text('p',event.content));const actions=text('div','','event-actions');actions.append(button('編輯',()=>openEvent(event)),button('刪除',async()=>{if(await confirmAction('刪除這則記事？','刪除後無法復原。')){if(save(deleteEvent(state,r.id,event.id)))notify('記事已刪除')}}));card.append(actions);$('events').append(card)}
@@ -80,7 +93,7 @@ $('event-form').onsubmit=e=>{
  const event={id:editing?.id||crypto.randomUUID(),date:$('event-date').value,title,content:$('event-content').value,createdAt:editing?.createdAt||new Date().toISOString()};
  try{if(save(upsertEvent(state,selected,event))){$('event-dialog').close();notify('記事已儲存')}}catch{$('form-error').textContent='請檢查日期與內容是否正確。'}
 };
-$('world-tab').onclick=()=>switchScope('world');$('taiwan-tab').onclick=()=>switchScope('taiwan');$('explore-taiwan').onclick=()=>switchScope('taiwan');
+$('world-tab').onclick=()=>switchScope('world');$('taiwan-tab').onclick=()=>switchScope('taiwan');$('explore-taiwan').onclick=()=>switchScope('taiwan');$('enter-taiwan').onclick=()=>switchScope('taiwan');
 $('zoom-in').onclick=()=>map.zoomBy(1.6);$('zoom-out').onclick=()=>map.zoomBy(1/1.6);$('reset-map').onclick=()=>map.reset();$('focus-region').onclick=()=>map.focus(selected);
 $('tools-toggle').onclick=()=>setTools($('panel').hidden);$('close-panel').onclick=()=>setTools(false);$('back-list').onclick=()=>{selected=null;map.select(null);refresh()};
 $('search-toggle').onclick=()=>setSearch($('search-box').hidden);$('close-search').onclick=()=>setSearch(false);
@@ -88,6 +101,15 @@ function search(){const q=$('search').value.trim();$('search-results').replaceCh
 $('search').addEventListener('input',search);$('search').addEventListener('focus',search);$('search').addEventListener('keydown',e=>{if(e.key==='Enter')$('search-results').querySelector('button')?.click();if(e.key==='Escape'){e.stopPropagation();setSearch(false)}});
 document.addEventListener('pointerdown',e=>{if(!e.target.closest('.search-box'))$('search-results').hidden=true;if(!e.target.closest('.more-menu'))$('more-menu').open=false});document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();setSearch(true)}if(e.key==='Escape'){setSearch(false);setTools(false);$('more-menu').open=false}});
 for(const el of document.querySelectorAll('[data-close]'))el.onclick=()=>$(el.dataset.close).close();
+function colorBackground(colors){return colors.length>1?`repeating-linear-gradient(125deg,${colors.map((color,i)=>`${color} ${i*5}px ${(i+1)*5}px`).join(',')})`:colors[0]||''}
+function resetPerson(){editingPerson=null;$('person-name').value='';$('person-color').value=['#db5353','#327fd1','#2d9b73','#915fc1'][state.salespeople.length%4];$('person-save').textContent='新增';$('person-cancel').hidden=true;$('people-error').textContent=''}
+function renderPeople(){
+ $('people-list').replaceChildren();
+ for(const person of state.salespeople){const row=text('div','','person-row');const swatch=text('span','','person-swatch');swatch.style.background=person.color;const name=text('span',person.name,'person-name');row.append(swatch,name,button('編輯',()=>{editingPerson=person.id;$('person-name').value=person.name;$('person-color').value=person.color;$('person-save').textContent='儲存';$('person-cancel').hidden=false;$('person-name').focus()}),button('刪除',async()=>{if(await confirmAction(`刪除 ${person.name}？`,'所有地區將移除此人的指派，記事保留。')&&save(deleteSalesperson(state,person.id))){renderPeople();resetPerson()}}));$('people-list').append(row)}
+}
+function openPeople(){$('more-menu').open=false;renderPeople();resetPerson();$('people-dialog').showModal()}
+$('manage-people').onclick=openPeople;$('people-button').onclick=openPeople;$('person-cancel').onclick=resetPerson;
+$('person-form').onsubmit=e=>{e.preventDefault();const name=$('person-name').value.trim();if(!name){$('people-error').textContent='請填寫姓名。';return}try{if(save(upsertSalesperson(state,{id:editingPerson||crypto.randomUUID(),name,color:$('person-color').value}))){renderPeople();resetPerson()}}catch{$('people-error').textContent='請檢查姓名與顏色。'}};
 $('backup-button').onclick=()=>{$('more-menu').open=false;$('backup-error').textContent='';$('backup-dialog').showModal()};
 $('export-data').onclick=()=>{
  let raw;try{raw=localStorage.getItem('world-notes:v1')||JSON.stringify(state,null,2)}catch{$('backup-error').textContent='瀏覽器目前不允許讀取資料，無法匯出。';return}
